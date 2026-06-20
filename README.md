@@ -7,12 +7,14 @@ El bot está pensado para ejecutarse gratis en la misma EC2 donde ya corren otro
 ## Fuentes configuradas
 
 - Yu-Gi-Oh!: `https://www.yugioh-card.com/eu/es/noticias/`
-- Pokémon: `https://www.pokemon.com/el/noticias-pokemon`
+- Pokémon oficial: `https://www.pokemon.com/el/noticias-pokemon`
+- Pokémon fallback: `https://vandal.elespanol.com/noticias/noticias-sobre-pokemon`
 
 ## Características
 
 - Consulta múltiples fuentes de noticias.
 - Si una fuente falla, la otra se sigue intentando.
+- Si Pokémon oficial está bloqueado, intenta una fuente fallback gratuita basada en Vandal.
 - Publica noticias nuevas en un canal de Discord.
 - Puede mencionar `@everyone`, un rol específico o nadie.
 - Guarda noticias enviadas en `sent-news.json` para evitar duplicados.
@@ -63,7 +65,10 @@ MAX_NEWS_PER_SOURCE=3
 
 YUGIOH_NEWS_URL=https://www.yugioh-card.com/eu/es/noticias/
 POKEMON_NEWS_URL=https://www.pokemon.com/el/noticias-pokemon
+ENABLE_POKEMON_FALLBACK=true
+POKEMON_FALLBACK_NEWS_URL=https://vandal.elespanol.com/noticias/noticias-sobre-pokemon
 
+SEND_EXISTING_ON_START=false
 SENT_NEWS_FILE=sent-news.json
 HTTP_TIMEOUT_MS=15000
 ```
@@ -75,6 +80,11 @@ Valores permitidos:
 - `everyone`: menciona `@everyone` en cada noticia.
 - `role`: menciona el rol configurado en `NEWS_ROLE_ID`.
 - `none`: no menciona a nadie.
+
+### SEND_EXISTING_ON_START
+
+- `false`: recomendado para producción. En el primer ciclo marca las noticias actuales como conocidas y no las publica.
+- `true`: recomendado para pruebas. Publica las noticias actuales que no existan en `sent-news.json`.
 
 ## Permisos del bot en Discord
 
@@ -103,18 +113,33 @@ En cada ciclo:
 1. Intenta consultar Yu-Gi-Oh!.
 2. Publica noticias nuevas si existen.
 3. Si Yu-Gi-Oh! falla, registra error y avisa a admins.
-4. Continúa con Pokémon sin detener el bot.
-5. Publica noticias nuevas si existen.
-6. Si Pokémon falla, registra error y avisa a admins.
-7. Espera el siguiente ciclo.
+4. Continúa con Pokémon oficial sin detener el bot.
+5. Si Pokémon oficial funciona, publica noticias nuevas si existen.
+6. Si Pokémon oficial falla o queda bloqueado, registra error, avisa a admins e intenta el fallback de Vandal.
+7. Si el fallback trae noticias nuevas, las publica como `Pokémon - Vandal`.
+8. Espera el siguiente ciclo.
 
 Una fuente caída no detiene el resto del procesamiento.
 
 ## Primera ejecución
 
-En el primer ciclo, el bot marca como enviadas las noticias existentes para evitar publicar muchas noticias antiguas de golpe.
+Por defecto, en el primer ciclo el bot marca como enviadas las noticias existentes para evitar publicar muchas noticias antiguas de golpe.
 
 Después de ese primer ciclo, solo publicará noticias nuevas.
+
+Para pruebas puedes usar:
+
+```env
+SEND_EXISTING_ON_START=true
+MAX_NEWS_PER_SOURCE=3
+```
+
+Y borrar el historial local:
+
+```bash
+rm -f sent-news.json
+pm2 restart CardNewsBot --update-env
+```
 
 ## Despliegue con PM2 en EC2
 
@@ -157,6 +182,7 @@ src/
  │    └── newsPublisher.js
  ├── sources/
  │    ├── pokemonSource.js
+ │    ├── pokemonVandalSource.js
  │    └── yugiohSource.js
  ├── storage/
  │    └── sentNewsStore.js
@@ -167,7 +193,7 @@ src/
 
 ## Notas sobre Pokémon
 
-`pokemon.com` puede bloquear requests automatizados con mecanismos anti-bot. El bot clasifica esos casos como `BLOCKED`, registra el error en PM2 y notifica al canal admin sin detener el procesamiento de Yu-Gi-Oh!.
+`pokemon.com` puede bloquear requests automatizados con mecanismos anti-bot. El bot clasifica esos casos como `BLOCKED`, registra el error en PM2, notifica al canal admin y luego intenta la fuente fallback configurada en `POKEMON_FALLBACK_NEWS_URL`.
 
 ## Seguridad
 
