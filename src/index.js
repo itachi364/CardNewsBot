@@ -80,6 +80,12 @@ client.once(Events.ClientReady, async (readyClient) => {
   console.log(`CardNewsBot connected as ${readyClient.user.tag}`);
   console.log(`Polling every ${config.pollIntervalMinutes} minute(s)`);
 
+  // TEST TEMPORAL: validar que el bot puede escribir en el canal de noticias
+  await newsChannel.send({
+    content: '@everyone prueba de publicación de CardNewsBot',
+    allowedMentions: { parse: ['everyone'] }
+  });
+
   await pollAllSources();
   setInterval(pollAllSources, config.pollIntervalMinutes * 60 * 1000);
 });
