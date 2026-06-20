@@ -8,14 +8,32 @@ const DEFAULT_HEADERS = {
   'Cache-Control': 'no-cache'
 };
 
+const BLOCK_PATTERNS = [
+  /incapsula/i,
+  /request unsuccessful/i,
+  /incident id/i,
+  /access denied/i,
+  /request blocked/i,
+  /captcha/i,
+  /_incapsula_resource/i,
+  /distil_r_blocked/i,
+  /akamai/i
+];
+
 export class HttpError extends Error {
-  constructor(message, { status, url, bodyPreview }) {
+  constructor(message, { status, url, bodyPreview, type = 'HTTP_ERROR' }) {
     super(message);
     this.name = 'HttpError';
     this.status = status;
+    this.statusCode = status;
     this.url = url;
     this.bodyPreview = bodyPreview;
+    this.type = type;
   }
+}
+
+function isBlockedBody(body) {
+  return BLOCK_PATTERNS.some((pattern) => pattern.test(body));
 }
 
 export async function fetchHtml(url) {
@@ -31,11 +49,21 @@ export async function fetchHtml(url) {
 
     const body = await response.text();
 
+    if (isBlockedBody(body)) {
+      throw new HttpError(`Possible anti-bot block fetching ${url}`, {
+        status: response.status,
+        url,
+        bodyPreview: body.slice(0, 500),
+        type: 'BLOCKED'
+      });
+    }
+
     if (!response.ok) {
       throw new HttpError(`HTTP ${response.status} fetching ${url}`, {
         status: response.status,
         url,
-        bodyPreview: body.slice(0, 500)
+        bodyPreview: body.slice(0, 500),
+        type: response.status === 403 || response.status === 429 ? 'BLOCKED' : 'HTTP_ERROR'
       });
     }
 
@@ -45,7 +73,8 @@ export async function fetchHtml(url) {
       throw new HttpError(`Timeout fetching ${url}`, {
         status: 0,
         url,
-        bodyPreview: ''
+        bodyPreview: '',
+        type: 'TIMEOUT'
       });
     }
     throw error;
