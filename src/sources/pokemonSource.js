@@ -79,7 +79,24 @@ function cleanTitle(title) {
     .replace(/\s+leer más$/i, '');
 }
 
-function extractTitle($, element, container) {
+function titleFromSlug(url) {
+  const pathname = new URL(url).pathname;
+  const slug = pathname.split('/').filter(Boolean).pop() || '';
+
+  return slug
+    .replace(/-/g, ' ')
+    .replace(/\bjcc\b/gi, 'JCC')
+    .replace(/\bpokemon\b/gi, 'Pokémon')
+    .replace(/\bde\b/g, 'de')
+    .replace(/\bla\b/g, 'la')
+    .replace(/\bel\b/g, 'el')
+    .replace(/\ben\b/g, 'en')
+    .replace(/\bun\b/g, 'un')
+    .replace(/\buna\b/g, 'una')
+    .replace(/^./, (char) => char.toUpperCase());
+}
+
+function extractTitle($, element, container, url) {
   const candidates = [
     $(element).find('h1,h2,h3,h4,[class*="title"],[class*="headline"]').first().text(),
     container.find('h1,h2,h3,h4,[class*="title"],[class*="headline"]').first().text(),
@@ -100,7 +117,9 @@ function extractTitle($, element, container) {
     .map(cleanTitle)
     .filter(looksLikeNewsTitle);
 
-  return parts[0] || '';
+  if (parts[0]) return parts[0];
+
+  return titleFromSlug(url);
 }
 
 function extractDate(container) {
@@ -136,6 +155,21 @@ function extractImage(container) {
   return firstSrc ? absoluteUrl(firstSrc) : '';
 }
 
+function findArticleLinksFromHtml(html) {
+  const matches = html.matchAll(/href=["']([^"']*(?:\/noticias-pokemon\/|\/pokemon-news\/)[^"']+)["']/gi);
+  const urls = [];
+
+  for (const match of matches) {
+    const url = absoluteUrl(match[1]);
+
+    if (looksLikeArticleUrl(url)) {
+      urls.push(url);
+    }
+  }
+
+  return urls;
+}
+
 export const pokemonSource = {
   name: 'Pokémon',
   url: config.pokemonNewsUrl,
@@ -157,7 +191,7 @@ export const pokemonSource = {
       if (seen.has(url)) return;
 
       const container = $(element).closest('article, .card, .news, .news-card, li, div');
-      const title = extractTitle($, element, container);
+      const title = extractTitle($, element, container, url);
 
       if (!looksLikeNewsTitle(title)) return;
 
@@ -177,6 +211,25 @@ export const pokemonSource = {
         imageUrl
       });
     });
+
+    for (const url of findArticleLinksFromHtml(html)) {
+      if (seen.has(url)) continue;
+
+      const title = titleFromSlug(url);
+      if (!looksLikeNewsTitle(title)) continue;
+
+      seen.add(url);
+
+      articles.push({
+        source: 'Pokémon',
+        id: url,
+        title,
+        summary: '',
+        date: '',
+        url,
+        imageUrl: ''
+      });
+    }
 
     return articles.slice(0, config.maxNewsPerSource);
   }
