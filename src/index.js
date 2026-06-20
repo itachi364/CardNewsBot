@@ -18,15 +18,22 @@ const client = new Client({
 async function processSource(source) {
   try {
     const latestNews = await source.fetchLatest();
-    let published = 0;
 
-    for (const item of latestNews.reverse()) {
+    if (!Array.isArray(latestNews) || latestNews.length === 0) {
+      return;
+    }
+
+    let published = 0;
+    let registeredOnStartup = 0;
+
+    for (const item of [...latestNews].reverse()) {
       if (store.has(item.id)) {
         continue;
       }
 
-      if (!hasRunInitialCycle) {
+      if (!hasRunInitialCycle && !config.sendExistingOnStart) {
         await store.markAsSent(item);
+        registeredOnStartup += 1;
         continue;
       }
 
@@ -35,10 +42,15 @@ async function processSource(source) {
       published += 1;
     }
 
+    if (registeredOnStartup > 0) {
+      console.log(`[${source.name}] Registered ${registeredOnStartup} existing article(s) without publishing on startup`);
+    }
+
     if (published > 0) {
       console.log(`[${source.name}] Published ${published} new article(s)`);
     }
   } catch (error) {
+    console.error(`[${source.name}] ${error.message}`);
     await notifyAdminSourceError(client, source, error);
   }
 }
@@ -79,7 +91,7 @@ client.once(Events.ClientReady, async (readyClient) => {
 
   console.log(`CardNewsBot connected as ${readyClient.user.tag}`);
   console.log(`Polling every ${config.pollIntervalMinutes} minute(s)`);
-
+  console.log(`Send existing on start: ${config.sendExistingOnStart}`);
 
   await pollAllSources();
   setInterval(pollAllSources, config.pollIntervalMinutes * 60 * 1000);
