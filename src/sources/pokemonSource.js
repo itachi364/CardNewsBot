@@ -119,10 +119,6 @@ export const pokemonSource = {
       });
     });
 
-    if (articles.length === 0) {
-      throw new Error('Parser error: no news found for Pokémon');
-    }
-
     return articles.slice(0, config.maxNewsPerSource);
   }
 };
