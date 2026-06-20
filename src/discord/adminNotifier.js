@@ -1,60 +1,71 @@
 import { EmbedBuilder } from 'discord.js';
 import { config } from '../config.js';
-import { classifySourceError } from '../utils/errorClassifier.js';
 
-const lastAdminAlerts = new Map();
+const adminAlertCooldowns = new Map();
 
-function shouldNotify(key) {
-  const cooldownMs = config.adminAlertCooldownMinutes * 60 * 1000;
-  const last = lastAdminAlerts.get(key) || 0;
+function shouldNotifyAdmin(sourceName) {
   const now = Date.now();
+  const lastAlertAt = adminAlertCooldowns.get(sourceName) || 0;
+  const cooldownMs = config.adminAlertCooldownMinutes * 60 * 1000;
 
-  if (now - last < cooldownMs) {
+  if (now - lastAlertAt < cooldownMs) {
     return false;
   }
 
-  lastAdminAlerts.set(key, now);
+  adminAlertCooldowns.set(sourceName, now);
   return true;
 }
 
-function safeErrorText(error) {
-  const message = error?.message || 'Unknown error';
-  return message.length > 900 ? `${message.slice(0, 900)}...` : message;
+function buildAdminMention() {
+  if (!config.adminRoleId) {
+    return '';
+  }
+
+  return `<@&${config.adminRoleId}>`;
 }
 
-export async function notifyAdminSourceError(client, source, error) {
-  const classification = classifySourceError(error);
-  const alertKey = `${source.name}:${classification.type}`;
-
-  console.error(`[${source.name}] ${classification.type}: ${classification.reason}. ${error.message}`);
-
-  if (!shouldNotify(alertKey)) {
+export async function notifyAdminSourceError(client, source, errorInfo) {
+  if (!config.adminLogChannelId) {
+    console.error(`[${source.name}] ADMIN_LOG_CHANNEL_ID is not configured.`);
     return;
   }
 
-  const channel = await client.channels.fetch(config.adminLogChannelId).catch(() => null);
-
-  if (!channel || !channel.isTextBased()) {
-    console.error(`Invalid admin log channel: ${config.adminLogChannelId}`);
+  if (!shouldNotifyAdmin(source.name)) {
     return;
   }
 
-  const embed = new EmbedBuilder()
-    .setColor(classification.type === 'BLOCKED' ? 0xff9900 : 0xff3333)
-    .setTitle(`⚠️ Problema consultando ${source.name}`)
-    .setDescription('Una fuente de noticias falló, pero el bot continuará intentando las demás fuentes.')
-    .addFields(
-      { name: 'Fuente', value: source.name, inline: true },
-      { name: 'Tipo', value: classification.type, inline: true },
-      { name: 'Motivo', value: classification.reason, inline: false },
-      { name: 'URL', value: source.url, inline: false },
-      { name: 'Error', value: safeErrorText(error), inline: false }
-    )
-    .setTimestamp();
+  try {
+    const channel = await client.channels.fetch(config.adminLogChannelId).catch(() => null);
 
-  await channel.send({
-    content: `<@&${config.adminRoleId}> revisar fuente de noticias: ${source.name}`,
-    embeds: [embed],
-    allowedMentions: { parse: [], roles: [config.adminRoleId] }
-  });
+    if (!channel || !channel.isTextBased()) {
+      console.error(`[${source.name}] Admin log channel is not accessible or is not text based: ${config.adminLogChannelId}`);
+      return;
+    }
+
+    const mention = buildAdminMention();
+
+    const embed = new EmbedBuilder()
+      .setColor(0xff3b3b)
+      .setTitle(`⚠️ Problema consultando ${source.name}`)
+      .setDescription('Una fuente de noticias falló, pero el bot continuará intentando las demás fuentes.')
+      .addFields(
+        { name: 'Fuente', value: source.name, inline: true },
+        { name: 'URL', value: source.url || 'No definida', inline: false },
+        { name: 'Tipo', value: errorInfo.type || 'UNKNOWN', inline: true },
+        { name: 'Estado HTTP', value: String(errorInfo.statusCode || 'N/A'), inline: true },
+        { name: 'Detalle', value: String(errorInfo.message || 'Sin detalle').slice(0, 1000), inline: false }
+      )
+      .setTimestamp();
+
+    await channel.send({
+      content: `${mention} revisar fuente de noticias: ${source.name}`.trim(),
+      embeds: [embed],
+      allowedMentions: config.adminRoleId
+        ? { parse: [], roles: [config.adminRoleId] }
+        : { parse: [] }
+    });
+  } catch (error) {
+    console.error(`[${source.name}] Could not send admin alert to Discord.`);
+    console.error(error);
+  }
 }
