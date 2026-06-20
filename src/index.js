@@ -5,8 +5,16 @@ import { notifyAdminSourceError } from './discord/adminNotifier.js';
 import { SentNewsStore } from './storage/sentNewsStore.js';
 import { yugiohSource } from './sources/yugiohSource.js';
 import { pokemonSource } from './sources/pokemonSource.js';
+import { pokemonVandalSource } from './sources/pokemonVandalSource.js';
 
-const sources = [yugiohSource, pokemonSource];
+const sources = [
+  yugiohSource,
+  {
+    ...pokemonSource,
+    fallbackSource: pokemonVandalSource
+  }
+];
+
 const store = new SentNewsStore();
 let isPolling = false;
 let hasRunInitialCycle = false;
@@ -15,43 +23,51 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
+async function publishItems(source, latestNews) {
+  if (!Array.isArray(latestNews) || latestNews.length === 0) {
+    return;
+  }
+
+  let published = 0;
+  let registeredOnStartup = 0;
+
+  for (const item of [...latestNews].reverse()) {
+    if (store.has(item.id)) {
+      continue;
+    }
+
+    if (!hasRunInitialCycle && !config.sendExistingOnStart) {
+      await store.markAsSent(item);
+      registeredOnStartup += 1;
+      continue;
+    }
+
+    await publishNews(client, item);
+    await store.markAsSent(item);
+    published += 1;
+  }
+
+  if (registeredOnStartup > 0) {
+    console.log(`[${source.name}] Registered ${registeredOnStartup} existing article(s) without publishing on startup`);
+  }
+
+  if (published > 0) {
+    console.log(`[${source.name}] Published ${published} new article(s)`);
+  }
+}
+
 async function processSource(source) {
   try {
     const latestNews = await source.fetchLatest();
-
-    if (!Array.isArray(latestNews) || latestNews.length === 0) {
-      return;
-    }
-
-    let published = 0;
-    let registeredOnStartup = 0;
-
-    for (const item of [...latestNews].reverse()) {
-      if (store.has(item.id)) {
-        continue;
-      }
-
-      if (!hasRunInitialCycle && !config.sendExistingOnStart) {
-        await store.markAsSent(item);
-        registeredOnStartup += 1;
-        continue;
-      }
-
-      await publishNews(client, item);
-      await store.markAsSent(item);
-      published += 1;
-    }
-
-    if (registeredOnStartup > 0) {
-      console.log(`[${source.name}] Registered ${registeredOnStartup} existing article(s) without publishing on startup`);
-    }
-
-    if (published > 0) {
-      console.log(`[${source.name}] Published ${published} new article(s)`);
-    }
+    await publishItems(source, latestNews);
   } catch (error) {
     console.error(`[${source.name}] ${error.message}`);
     await notifyAdminSourceError(client, source, error);
+
+    if (source.fallbackSource) {
+      console.log(`[${source.name}] Trying fallback source: ${source.fallbackSource.name}`);
+      await processSource(source.fallbackSource);
+    }
   }
 }
 
@@ -92,6 +108,7 @@ client.once(Events.ClientReady, async (readyClient) => {
   console.log(`CardNewsBot connected as ${readyClient.user.tag}`);
   console.log(`Polling every ${config.pollIntervalMinutes} minute(s)`);
   console.log(`Send existing on start: ${config.sendExistingOnStart}`);
+  console.log(`Pokemon fallback enabled: ${config.enablePokemonFallback}`);
 
   await pollAllSources();
   setInterval(pollAllSources, config.pollIntervalMinutes * 60 * 1000);
