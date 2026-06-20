@@ -10,34 +10,35 @@ function normalizeText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
+function normalizeForCompare(value) {
+  return normalizeText(value)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
 function isIgnoredTitle(title) {
-  const normalized = normalizeText(title).toLowerCase();
+  const normalized = normalizeForCompare(title);
 
   return [
     'todas las noticias',
-    'noticias pokémon',
     'noticias pokemon',
     'pokemon news',
     'all news',
     'news',
-    'más noticias',
     'mas noticias',
-    'ver más',
     'ver mas',
-    'leer más',
     'leer mas'
   ].includes(normalized);
 }
 
 function looksLikeArticleUrl(url) {
-  const normalized = String(url || '').toLowerCase();
+  const normalized = String(url || '').toLowerCase().replace(/\/$/, '');
+  const indexEs = config.pokemonNewsUrl.toLowerCase().replace(/\/$/, '');
+  const indexEn = 'https://www.pokemon.com/us/pokemon-news';
 
   if (!normalized) return false;
-
-  if (normalized.endsWith('/noticias-pokemon')) return false;
-  if (normalized.endsWith('/noticias-pokemon/')) return false;
-  if (normalized.endsWith('/pokemon-news')) return false;
-  if (normalized.endsWith('/pokemon-news/')) return false;
+  if (normalized === indexEs || normalized === indexEn) return false;
 
   return normalized.includes('/noticias-pokemon/') || normalized.includes('/pokemon-news/');
 }
@@ -52,19 +53,64 @@ function looksLikeNewsTitle(title) {
   return true;
 }
 
-function extractTitle($, element) {
-  const heading = normalizeText($(element).find('h1,h2,h3,h4').first().text());
-  if (heading) return heading;
+function findDate(text) {
+  const normalized = normalizeText(text);
 
-  return normalizeText($(element).text());
+  const patterns = [
+    /\b\d{1,2}\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\s+de\s+\d{4}\b/i,
+    /\b\d{1,2}\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\s+\d{4}\b/i,
+    /\b\d{1,2}\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4}\b/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = normalized.match(pattern);
+    if (match) return match[0];
+  }
+
+  return '';
+}
+
+function cleanTitle(title) {
+  return normalizeText(title)
+    .replace(/^\d{1,2}\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\s+de\s+\d{4}\s*/i, '')
+    .replace(/^\d{1,2}\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\s+\d{4}\s*/i, '')
+    .replace(/^(dibujos animados|videojuegos y aplicaciones|juego de cartas coleccionables)\s*/i, '')
+    .replace(/\s+leer mas$/i, '')
+    .replace(/\s+leer más$/i, '');
+}
+
+function extractTitle($, element, container) {
+  const candidates = [
+    $(element).find('h1,h2,h3,h4,[class*="title"],[class*="headline"]').first().text(),
+    container.find('h1,h2,h3,h4,[class*="title"],[class*="headline"]').first().text(),
+    $(element).attr('title'),
+    $(element).attr('aria-label')
+  ];
+
+  for (const candidate of candidates) {
+    const title = cleanTitle(candidate);
+    if (looksLikeNewsTitle(title)) return title;
+  }
+
+  const containerText = normalizeText(container.text());
+  const date = findDate(containerText);
+  const withoutDate = date ? containerText.replace(date, '') : containerText;
+  const parts = withoutDate
+    .split(/(?<=[.!?])\s+/)
+    .map(cleanTitle)
+    .filter(looksLikeNewsTitle);
+
+  return parts[0] || '';
 }
 
 function extractDate(container) {
-  return (
+  const explicitDate = (
     normalizeText(container.find('time').first().text()) ||
     normalizeText(container.find('.date').first().text()) ||
     normalizeText(container.find('[class*="date"]').first().text())
   );
+
+  return explicitDate || findDate(container.text());
 }
 
 function extractSummary(container, title) {
@@ -75,6 +121,19 @@ function extractSummary(container, title) {
   }
 
   return '';
+}
+
+function extractImage(container) {
+  const image = container.find('img').first();
+  const src = image.attr('src') || image.attr('data-src') || image.attr('data-original');
+
+  if (src) return absoluteUrl(src);
+
+  const srcset = image.attr('srcset') || image.attr('data-srcset');
+  if (!srcset) return '';
+
+  const firstSrc = srcset.split(',')[0]?.trim().split(/\s+/)[0];
+  return firstSrc ? absoluteUrl(firstSrc) : '';
 }
 
 export const pokemonSource = {
@@ -97,14 +156,14 @@ export const pokemonSource = {
       if (!looksLikeArticleUrl(url)) return;
       if (seen.has(url)) return;
 
-      const title = extractTitle($, element);
+      const container = $(element).closest('article, .card, .news, .news-card, li, div');
+      const title = extractTitle($, element, container);
 
       if (!looksLikeNewsTitle(title)) return;
 
-      const container = $(element).closest('article, .card, .news, li, div');
       const summary = extractSummary(container, title);
       const date = extractDate(container);
-      const imageSrc = container.find('img').first().attr('src');
+      const imageUrl = extractImage(container);
 
       seen.add(url);
 
@@ -115,7 +174,7 @@ export const pokemonSource = {
         summary,
         date,
         url,
-        imageUrl: imageSrc ? absoluteUrl(imageSrc) : ''
+        imageUrl
       });
     });
 
