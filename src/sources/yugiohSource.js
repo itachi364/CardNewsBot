@@ -22,7 +22,12 @@ function isIgnoredTitle(title) {
     'eventos',
     'actualizar',
     'speed duel',
-    'enlace'
+    'enlace',
+    'official tournament stores',
+    'ots',
+    'where to buy',
+    'support',
+    'contact us'
   ].includes(normalized);
 }
 
@@ -36,17 +41,17 @@ function looksLikeNewsTitle(title) {
   return true;
 }
 
-function looksLikeNewsUrl(url) {
+function looksLikeArticleUrl(url) {
   const normalized = String(url || '').toLowerCase();
+  const base = config.yugiohNewsUrl.replace(/\/$/, '').toLowerCase();
 
   if (!normalized) return false;
+  if (normalized.includes('#')) return false;
+  if (normalized === base || normalized === `${base}/`) return false;
+  if (normalized.endsWith('/noticias') || normalized.endsWith('/noticias/')) return false;
+  if (normalized.endsWith('/news') || normalized.endsWith('/news/')) return false;
 
-  if (normalized.includes('/eu/es/noticias/')) return true;
-  if (normalized.includes('/eu/es/news/')) return true;
-  if (normalized.includes('?p=')) return true;
-  if (normalized.includes('/?p=')) return true;
-
-  return false;
+  return normalized.startsWith('https://www.yugioh-card.com/eu/es/');
 }
 
 function findDate(text) {
@@ -76,6 +81,16 @@ function cleanTitle(title) {
   return normalizeText(value);
 }
 
+function extractTitle($, element, container) {
+  const headingFromLink = normalizeText($(element).find('h1,h2,h3,h4').first().text());
+  if (headingFromLink) return cleanTitle(headingFromLink);
+
+  const headingFromContainer = normalizeText(container.find('h1,h2,h3,h4').first().text());
+  if (headingFromContainer) return cleanTitle(headingFromContainer);
+
+  return cleanTitle($(element).text());
+}
+
 function extractSummary(container, title) {
   const paragraphSummary = normalizeText(container.find('p').first().text());
 
@@ -99,20 +114,18 @@ function extractSummary(container, title) {
 
 function buildArticleFromLink($, element, seen) {
   const href = $(element).attr('href');
-  const rawText = normalizeText($(element).text());
 
-  if (!href || !rawText) return null;
+  if (!href) return null;
 
   const url = absoluteUrl(href);
 
   if (seen.has(url)) return null;
-  if (!looksLikeNewsUrl(url) && !rawText.toLowerCase().includes('yu-gi-oh')) return null;
+  if (!looksLikeArticleUrl(url)) return null;
 
   const container = $(element).closest('article, .post, .news, .card, .item, li, div');
-  const containerText = normalizeText(container.text()) || rawText;
-
+  const containerText = normalizeText(container.text());
   const date = normalizeText(container.find('time').first().text()) || findDate(containerText);
-  const title = cleanTitle(rawText);
+  const title = extractTitle($, element, container);
 
   if (!looksLikeNewsTitle(title)) return null;
 
@@ -149,41 +162,6 @@ export const yugiohSource = {
         articles.push(article);
       }
     });
-
-    if (articles.length === 0) {
-      const pageText = normalizeText($('body').text());
-
-      const fallbackMatches = pageText.matchAll(
-        /(Noticias|News|Actualizar|Update)\s+(\d{1,2}\s+\w+\s+\d{4})\s+(.+?)(?=\s+(Noticias|News|Actualizar|Update)\s+\d{1,2}\s+\w+\s+\d{4}|Page\s+\d+|View All|Social Media|$)/gi
-      );
-
-      for (const match of fallbackMatches) {
-        const date = normalizeText(match[2]);
-        const titleAndSummary = normalizeText(match[3]).replace(/\s+More\s*$/i, '');
-        const title = cleanTitle(titleAndSummary.split('. ')[0]);
-
-        if (!looksLikeNewsTitle(title)) continue;
-
-        const id = `${config.yugiohNewsUrl}#${encodeURIComponent(title)}`;
-
-        if (seen.has(id)) continue;
-        seen.add(id);
-
-        articles.push({
-          source: 'Yu-Gi-Oh!',
-          id,
-          title,
-          summary: titleAndSummary.slice(0, 500),
-          date,
-          url: config.yugiohNewsUrl,
-          imageUrl: ''
-        });
-      }
-    }
-
-    if (articles.length === 0) {
-      throw new Error('Parser error: no news found for Yu-Gi-Oh!');
-    }
 
     return articles.slice(0, config.maxNewsPerSource);
   }
