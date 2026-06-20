@@ -18,6 +18,17 @@ function numberEnv(name, fallback) {
   return parsed;
 }
 
+function booleanEnv(name, fallback) {
+  const raw = process.env[name];
+  if (!raw || !raw.trim()) return fallback;
+
+  const value = raw.trim().toLowerCase();
+  if (['true', '1', 'yes', 'y'].includes(value)) return true;
+  if (['false', '0', 'no', 'n'].includes(value)) return false;
+
+  throw new Error(`Environment variable ${name} must be a boolean value`);
+}
+
 export const config = {
   discordToken: requireEnv('DISCORD_TOKEN'),
   newsChannelId: requireEnv('NEWS_CHANNEL_ID'),
@@ -31,7 +42,8 @@ export const config = {
   yugiohNewsUrl: process.env.YUGIOH_NEWS_URL?.trim() || 'https://www.yugioh-card.com/eu/es/noticias/',
   pokemonNewsUrl: process.env.POKEMON_NEWS_URL?.trim() || 'https://www.pokemon.com/el/noticias-pokemon',
   sentNewsFile: process.env.SENT_NEWS_FILE?.trim() || 'sent-news.json',
-  httpTimeoutMs: numberEnv('HTTP_TIMEOUT_MS', 15000)
+  httpTimeoutMs: numberEnv('HTTP_TIMEOUT_MS', 15000),
+  sendExistingOnStart: booleanEnv('SEND_EXISTING_ON_START', false)
 };
 
 if (!['everyone', 'role', 'none'].includes(config.mentionMode)) {
