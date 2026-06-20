@@ -41,6 +41,8 @@ export const config = {
   maxNewsPerSource: numberEnv('MAX_NEWS_PER_SOURCE', 3),
   yugiohNewsUrl: process.env.YUGIOH_NEWS_URL?.trim() || 'https://www.yugioh-card.com/eu/es/noticias/',
   pokemonNewsUrl: process.env.POKEMON_NEWS_URL?.trim() || 'https://www.pokemon.com/el/noticias-pokemon',
+  enablePokemonFallback: booleanEnv('ENABLE_POKEMON_FALLBACK', true),
+  pokemonFallbackNewsUrl: process.env.POKEMON_FALLBACK_NEWS_URL?.trim() || 'https://vandal.elespanol.com/noticias/noticias-sobre-pokemon',
   sentNewsFile: process.env.SENT_NEWS_FILE?.trim() || 'sent-news.json',
   httpTimeoutMs: numberEnv('HTTP_TIMEOUT_MS', 15000),
   sendExistingOnStart: booleanEnv('SEND_EXISTING_ON_START', false)
